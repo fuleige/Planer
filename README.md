@@ -19,11 +19,30 @@
 
 ```bash
 npm install
-npm run db:migrate:local
+npm run db:setup:local
 npm run dev
 ```
 
-打开 `http://localhost:3000`。
+`db:setup:local` 只需在首次创建本地数据库时执行：它先创建表，再将演示数据显式写入数据库。应用运行时不会自动创建演示数据。之后直接启动即可。打开
+`http://localhost:3000`。
+
+## 局域网运行
+
+开发模式（支持代码修改后自动刷新）：
+
+```bash
+npm run dev:lan
+```
+
+生产构建模式：
+
+```bash
+npm run build
+npm run start:lan
+```
+
+同一局域网内的设备访问 `http://<运行电脑的局域网 IP>:3000`。服务会监听
+`0.0.0.0`，首次启动时如果 macOS 弹出防火墙提示，需要允许 Node.js 接受传入连接。
 
 ## 检查
 
@@ -34,3 +53,4 @@ npm run build
 ```
 
 数据库结构由 `db/schema.ts` 定义，迁移文件位于 `drizzle/`。修改结构后使用 `npm run db:generate -- --name <migration-name>` 生成新迁移，不要修改已经应用的迁移文件。
+演示数据位于 `db/seed-demo.sql`，需要时可通过 `npm run db:seed:local` 显式写入；该命令不会覆盖已有记录。

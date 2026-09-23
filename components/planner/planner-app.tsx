@@ -1,8 +1,8 @@
 'use client';
 
 import { useCallback, useMemo, useRef, useState } from 'react';
+import Image from 'next/image';
 import {
-  CalendarDays,
   CalendarRange,
   Check,
   ChevronRight,
@@ -288,9 +288,14 @@ export function PlannerApp({ initialData }: { initialData: PlannerData }) {
 function Brand({ compact = false }: { compact?: boolean }) {
   return (
     <div className={`flex items-center gap-3 ${compact ? '' : 'px-2'}`}>
-      <div className={`${compact ? 'size-9 rounded-xl' : 'size-10 rounded-[14px]'} grid place-items-center bg-primary text-primary-foreground shadow-[0_8px_24px_rgba(79,70,229,.24)]`}>
-        <CalendarDays className="size-5" strokeWidth={2.2} />
-      </div>
+      <Image
+        src="/app-icon.png"
+        alt=""
+        aria-hidden="true"
+        width={40}
+        height={40}
+        className={`${compact ? 'size-9 rounded-xl' : 'size-10 rounded-[14px]'} shadow-[0_8px_24px_rgba(79,70,229,.24)]`}
+      />
       <div>
         <p className="text-[1.05rem] font-bold tracking-[-0.02em]">序时</p>
         {!compact ? <p className="text-xs text-muted-foreground">把计划变成今天</p> : null}
