@@ -5,22 +5,37 @@ import Image from 'next/image';
 import {
   CalendarRange,
   Check,
+  ChevronDown,
   ChevronRight,
   CircleAlert,
   CircleDashed,
   FolderKanban,
+  Layers3,
   ListTree,
+  LogOut,
   Plus,
   Repeat2,
-  Settings2,
   SunMedium,
   Target,
 } from 'lucide-react';
+import {
+  CreateStructureDialog,
+  type StructureKind,
+} from '@/components/planner/create-structure-dialog';
 import { CreateTaskDialog } from '@/components/planner/create-task-dialog';
 import { TaskRow, TaskRowSkeleton } from '@/components/planner/task-row';
 import { PlannerWebMcpTools } from '@/components/planner/webmcp-tools';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import {
   Empty,
   EmptyDescription,
@@ -29,7 +44,7 @@ import {
   EmptyTitle,
 } from '@/components/ui/empty';
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
-import { addDays } from '@/lib/date';
+import { addDays, dateInTimeZone } from '@/lib/date';
 import type {
   PlannerData,
   PlannerOccurrence,
@@ -70,6 +85,8 @@ export function PlannerApp({ initialData }: { initialData: PlannerData }) {
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [newTaskOpen, setNewTaskOpen] = useState(false);
+  const [newStructureKind, setNewStructureKind] = useState<StructureKind | null>(null);
+  const [loggingOut, setLoggingOut] = useState(false);
   const [upcomingDays, setUpcomingDays] = useState(14);
   const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -95,7 +112,7 @@ export function PlannerApp({ initialData }: { initialData: PlannerData }) {
 
   const derived = useMemo(() => {
     if (!data) {
-      return { overdue: [], today: [], completedToday: [], upcoming: [], undated: [], redCount: 0, yellowCount: 0 };
+      return { overdue: [], today: [], completedToday: [], handledToday: [], upcoming: [], undated: [], redCount: 0, yellowCount: 0 };
     }
     const pending = data.occurrences.filter((occurrence) => occurrence.status === 'PENDING');
     const overdue = pending.filter((occurrence) => occurrence.dueDate && occurrence.dueDate < data.today);
@@ -103,6 +120,10 @@ export function PlannerApp({ initialData }: { initialData: PlannerData }) {
     const completedToday = data.occurrences.filter(
       (occurrence) => occurrence.status === 'COMPLETED' && isTodayOccurrence(occurrence, data.today),
     );
+    const handledToday = data.occurrences.filter((occurrence) => {
+      const actionAt = occurrence.status === 'COMPLETED' ? occurrence.completedAt : occurrence.status === 'CANCELLED' ? occurrence.cancelledAt : null;
+      return Boolean(actionAt && dateInTimeZone(actionAt, data.timeZone) === data.today);
+    });
     const rangeEnd = addDays(data.today, data.upcomingDays);
     const upcoming = pending.filter((occurrence) => {
       const planDate = occurrencePlanDate(occurrence);
@@ -115,6 +136,7 @@ export function PlannerApp({ initialData }: { initialData: PlannerData }) {
       overdue,
       today,
       completedToday,
+      handledToday,
       upcoming,
       undated,
       redCount: new Set([...overdue, ...today].map((occurrence) => occurrence.id)).size,
@@ -156,6 +178,15 @@ export function PlannerApp({ initialData }: { initialData: PlannerData }) {
     void refresh(days);
   };
 
+  const logout = async () => {
+    setLoggingOut(true);
+    try {
+      await fetch('/api/auth/logout', { method: 'POST' });
+    } finally {
+      window.location.assign('/login');
+    }
+  };
+
   const navItems: Array<{
     id: View;
     label: string;
@@ -185,7 +216,18 @@ export function PlannerApp({ initialData }: { initialData: PlannerData }) {
         </nav>
 
         <div className="mt-8 px-3">
-          <p className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">领域</p>
+          <div className="flex items-center justify-between">
+            <p className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">领域</p>
+            <button
+              type="button"
+              className="grid size-7 place-items-center rounded-lg text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground"
+              onClick={() => setNewStructureKind('AREA')}
+              aria-label="新建领域"
+              title="新建领域"
+            >
+              <Plus className="size-3.5" />
+            </button>
+          </div>
           <div className="mt-3 space-y-3 text-sm">
             {(data?.areas ?? []).map((area) => (
               <div key={area.id} className="flex items-center gap-3 text-muted-foreground">
@@ -195,12 +237,13 @@ export function PlannerApp({ initialData }: { initialData: PlannerData }) {
               </div>
             ))}
             {loading && !data ? <span className="block h-14 animate-pulse rounded-xl bg-muted" /> : null}
+            {data && !data.areas.length ? (
+              <button type="button" className="text-left text-xs text-muted-foreground hover:text-foreground" onClick={() => setNewStructureKind('AREA')}>
+                暂无领域，点击创建
+              </button>
+            ) : null}
           </div>
         </div>
-
-        <button type="button" className="mt-auto flex min-h-11 items-center gap-3 rounded-xl px-3 text-sm text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground">
-          <Settings2 className="size-[18px]" />设置
-        </button>
       </aside>
 
       <main className="pb-24 md:ml-[252px] md:pb-0">
@@ -211,9 +254,39 @@ export function PlannerApp({ initialData }: { initialData: PlannerData }) {
               <p className="text-sm font-medium text-muted-foreground">今天</p>
               <p className="text-sm font-semibold">{data ? longDate(data.today) : '正在读取日期'}</p>
             </div>
-            <Button className="rounded-xl px-4 shadow-sm" onClick={() => setNewTaskOpen(true)} disabled={!data}>
-              <Plus className="size-4" />新建任务
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button variant="ghost" size="icon" className="rounded-xl" onClick={() => void logout()} disabled={loggingOut} aria-label="退出登录" title="退出登录">
+                <LogOut className="size-4" />
+              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  disabled={!data}
+                  className="inline-flex h-9 items-center justify-center gap-2 rounded-xl bg-primary px-4 text-sm font-medium text-primary-foreground shadow-sm transition-all hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
+                >
+                  <Plus className="size-4" />
+                  <span>新建<span className="hidden sm:inline">事项</span></span>
+                  <ChevronDown className="size-3.5 opacity-75" />
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-48">
+                  <DropdownMenuGroup>
+                    <DropdownMenuLabel>选择事项类型</DropdownMenuLabel>
+                    <DropdownMenuItem onClick={() => setNewStructureKind('AREA')}>
+                      <Layers3 />领域
+                    </DropdownMenuItem>
+                    <DropdownMenuItem disabled={!data?.areas.length} onClick={() => setNewStructureKind('GOAL')}>
+                      <Target />目标
+                    </DropdownMenuItem>
+                    <DropdownMenuItem disabled={!data?.goals.length} onClick={() => setNewStructureKind('PROJECT')}>
+                      <FolderKanban />项目
+                    </DropdownMenuItem>
+                  </DropdownMenuGroup>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem disabled={!data?.goals.length} onClick={() => setNewTaskOpen(true)}>
+                    <Check />任务
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
           </div>
         </header>
 
@@ -248,7 +321,15 @@ export function PlannerApp({ initialData }: { initialData: PlannerData }) {
             <UpcomingView data={data} loading={loading} occurrences={derived.upcoming} upcomingDays={upcomingDays} onRangeChange={changeUpcomingRange} onStatusChange={changeStatus} />
           ) : null}
           {activeView === 'plan' ? (
-            <PlanView data={data} loading={loading} undatedCount={derived.undated.length} />
+            <PlanView
+              data={data}
+              loading={loading}
+              undatedCount={derived.undated.length}
+              onCreateArea={() => setNewStructureKind('AREA')}
+              onCreateGoal={() => setNewStructureKind('GOAL')}
+              onCreateProject={() => setNewStructureKind('PROJECT')}
+              onCreateTask={() => setNewTaskOpen(true)}
+            />
           ) : null}
         </div>
       </main>
@@ -268,7 +349,23 @@ export function PlannerApp({ initialData }: { initialData: PlannerData }) {
       {data ? (
         <>
           <PlannerWebMcpTools data={data} onRefresh={refresh} onNotice={showNotice} />
+          {(['AREA', 'GOAL', 'PROJECT'] as const).map((kind) => (
+            <CreateStructureDialog
+              key={`${kind}-${data.areas.map((area) => area.id).join('-')}-${data.goals.map((goal) => goal.id).join('-')}`}
+              kind={kind}
+              open={newStructureKind === kind}
+              onOpenChange={(open) => setNewStructureKind(open ? kind : null)}
+              areas={data.areas}
+              goals={data.goals}
+              today={data.today}
+              onCreated={async () => {
+                await refresh();
+                showNotice(`${kind === 'AREA' ? '领域' : kind === 'GOAL' ? '目标' : '项目'}已创建`);
+              }}
+            />
+          ))}
           <CreateTaskDialog
+            key={`task-${data.goals.map((goal) => goal.id).join('-')}-${data.projects.map((project) => project.id).join('-')}`}
             open={newTaskOpen}
             onOpenChange={setNewTaskOpen}
             goals={data.goals}
@@ -353,7 +450,7 @@ function TodayView({
 }: {
   data: PlannerData | null;
   loading: boolean;
-  derived: { overdue: PlannerOccurrence[]; today: PlannerOccurrence[]; completedToday: PlannerOccurrence[]; upcoming: PlannerOccurrence[]; undated: TaskDefinitionSummary[] };
+  derived: { overdue: PlannerOccurrence[]; today: PlannerOccurrence[]; completedToday: PlannerOccurrence[]; handledToday: PlannerOccurrence[]; upcoming: PlannerOccurrence[]; undated: TaskDefinitionSummary[] };
   onStatusChange: (id: string, status: TaskStatus) => void;
   onOpenUpcoming: () => void;
 }) {
@@ -398,11 +495,11 @@ function TodayView({
           )}
         </section>
 
-        {derived.completedToday.length ? (
+        {derived.handledToday.length ? (
           <details className="rounded-2xl border border-dashed border-border bg-card/60">
-            <summary className="cursor-pointer list-none px-4 py-4 text-sm font-medium text-muted-foreground">今天已完成 {derived.completedToday.length} 项</summary>
+            <summary className="cursor-pointer list-none px-4 py-4 text-sm font-medium text-muted-foreground">今天已处理 {derived.handledToday.length} 项</summary>
             <div className="space-y-2 border-t border-border p-3">
-              {derived.completedToday.map((occurrence) => <TaskRow key={occurrence.id} occurrence={occurrence} today={data.today} onStatusChange={onStatusChange} compact />)}
+              {derived.handledToday.map((occurrence) => <TaskRow key={occurrence.id} occurrence={occurrence} today={data.today} onStatusChange={onStatusChange} compact />)}
             </div>
           </details>
         ) : null}
@@ -481,15 +578,56 @@ function UpcomingView({ data, loading, occurrences, upcomingDays, onRangeChange,
   );
 }
 
-function PlanView({ data, loading, undatedCount }: { data: PlannerData | null; loading: boolean; undatedCount: number }) {
+function PlanView({
+  data,
+  loading,
+  undatedCount,
+  onCreateArea,
+  onCreateGoal,
+  onCreateProject,
+  onCreateTask,
+}: {
+  data: PlannerData | null;
+  loading: boolean;
+  undatedCount: number;
+  onCreateArea: () => void;
+  onCreateGoal: () => void;
+  onCreateProject: () => void;
+  onCreateTask: () => void;
+}) {
   const [filter, setFilter] = useState<PlanFilter>('all');
   if (loading && !data) return <LoadingList />;
   if (!data) return null;
+
+  if (!data.areas.length) {
+    return (
+      <Empty className="border border-dashed border-border bg-card py-16">
+        <EmptyHeader>
+          <EmptyMedia variant="icon"><Layers3 /></EmptyMedia>
+          <EmptyTitle>从第一个领域开始</EmptyTitle>
+          <EmptyDescription>领域是目标、项目和任务的最上层归类，例如工作、健康或个人成长。</EmptyDescription>
+        </EmptyHeader>
+        <Button className="mt-2 rounded-xl" onClick={onCreateArea}><Plus className="size-4" />创建领域</Button>
+      </Empty>
+    );
+  }
 
   const visibleTask = (task: TaskDefinitionSummary) => filter === 'all' || (task.type === 'ONE_TIME' && !task.ownDueDate && task.pendingCount > 0);
 
   return (
     <section>
+      {!data.goals.length ? (
+        <div className="mb-6 flex flex-col gap-4 rounded-2xl border border-primary/20 bg-primary/5 p-5 sm:flex-row sm:items-center sm:justify-between">
+          <div><p className="font-semibold">领域已经准备好了</p><p className="mt-1 text-sm text-muted-foreground">下一步创建目标，之后就可以继续添加项目或直接任务。</p></div>
+          <Button className="shrink-0 rounded-xl" onClick={onCreateGoal}><Plus className="size-4" />创建目标</Button>
+        </div>
+      ) : null}
+      {data.goals.length && !data.taskDefinitions.length ? (
+        <div className="mb-6 flex flex-col gap-4 rounded-2xl border border-primary/20 bg-primary/5 p-5 sm:flex-row sm:items-center sm:justify-between">
+          <div><p className="font-semibold">目标已经建立</p><p className="mt-1 text-sm text-muted-foreground">任务可以直接属于目标，也可以先创建项目再归入任务。</p></div>
+          <div className="flex shrink-0 gap-2"><Button variant="outline" className="rounded-xl" onClick={onCreateProject}><FolderKanban className="size-4" />创建项目</Button><Button className="rounded-xl" onClick={onCreateTask}><Plus className="size-4" />创建任务</Button></div>
+        </div>
+      ) : null}
       <div className="mb-6 flex flex-wrap items-center gap-2">
         <Button variant={filter === 'all' ? 'default' : 'outline'} size="sm" className="rounded-full" onClick={() => setFilter('all')}><ListTree className="size-4" />全部事项</Button>
         <Button variant={filter === 'undated' ? 'default' : 'outline'} size="sm" className="rounded-full" onClick={() => setFilter('undated')}><CircleDashed className="size-4" />未安排截止日期 {undatedCount}</Button>
@@ -511,7 +649,9 @@ function PlanView({ data, loading, undatedCount }: { data: PlannerData | null; l
                 {areaGoals.map((goal) => {
                   const directTasks = data.taskDefinitions.filter((task) => task.goalId === goal.id && !task.projectId && visibleTask(task));
                   const goalProjects = data.projects.filter((project) => project.goalId === goal.id);
-                  const visibleProjects = goalProjects.filter((project) => data.taskDefinitions.some((task) => task.projectId === project.id && visibleTask(task)));
+                  const visibleProjects = filter === 'all'
+                    ? goalProjects
+                    : goalProjects.filter((project) => data.taskDefinitions.some((task) => task.projectId === project.id && visibleTask(task)));
                   if (filter === 'undated' && !directTasks.length && !visibleProjects.length) return null;
                   return (
                     <details key={goal.id} open className="group/goal">
@@ -560,7 +700,7 @@ function PlanTaskRow({ task }: { task: TaskDefinitionSummary }) {
   return (
     <div className="flex items-center gap-3 rounded-xl border border-border/70 bg-background px-3 py-3">
       <span className={`grid size-7 place-items-center rounded-lg ${task.type === 'RECURRING' ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground'}`}>
-        {task.type === 'RECURRING' ? <Repeat2 className="size-3.5" /> : <Check className="size-3.5" />}
+        {task.type === 'RECURRING' ? <Repeat2 className="size-3.5" /> : <CircleDashed className="size-3.5" />}
       </span>
       <span className="min-w-0 flex-1"><span className="block truncate text-sm font-medium">{task.title}</span><span className="mt-0.5 block text-xs text-muted-foreground">{recurrenceLabel ?? (task.ownDueDate ? `${shortDate(task.ownDueDate)} 截止` : '未安排截止日期')}</span></span>
       <span className="text-xs text-muted-foreground">{task.pendingCount ? `${task.pendingCount} 待处理` : task.completedCount ? '已完成' : '已取消'}</span>

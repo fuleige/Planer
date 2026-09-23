@@ -1,14 +1,18 @@
 const DAY_MS = 86_400_000;
 
-export function todayInTimeZone(timeZone = 'Asia/Shanghai') {
+export function dateInTimeZone(date: Date | string, timeZone = 'Asia/Shanghai') {
   const parts = new Intl.DateTimeFormat('en-US', {
     timeZone,
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
-  }).formatToParts(new Date());
+  }).formatToParts(typeof date === 'string' ? new Date(date) : date);
   const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
   return `${values.year}-${values.month}-${values.day}`;
+}
+
+export function todayInTimeZone(timeZone = 'Asia/Shanghai') {
+  return dateInTimeZone(new Date(), timeZone);
 }
 
 export function parseDate(date: string) {

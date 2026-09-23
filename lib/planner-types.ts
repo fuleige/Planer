@@ -10,6 +10,7 @@ export type PlannerOccurrence = {
   dueDate: string | null;
   status: TaskStatus;
   completedAt: string | null;
+  cancelledAt: string | null;
   goalId: string;
   goalTitle: string;
   projectId: string | null;
@@ -68,6 +69,7 @@ export type TaskDefinitionSummary = {
 
 export type PlannerData = {
   today: string;
+  timeZone: string;
   upcomingDays: number;
   areas: AreaSummary[];
   goals: GoalSummary[];

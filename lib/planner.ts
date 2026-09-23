@@ -39,11 +39,66 @@ export type CreateTaskInput = {
   projectId?: string | null;
   startDate: string;
   dueDate?: string | null;
+  durationValue?: number | null;
   displayUnit?: 'DAY' | 'WEEK';
   recurrence?: 'NONE' | 'DAILY' | 'WEEKLY';
   interval?: number;
   recurrenceEndDate?: string | null;
 };
+
+export type CreateAreaInput = {
+  name: string;
+  color?: string;
+};
+
+export type CreateGoalInput = {
+  areaId: string;
+  title: string;
+  description?: string;
+  startDate: string;
+  dueDate?: string | null;
+  durationValue?: number | null;
+};
+
+export type CreateProjectInput = {
+  goalId: string;
+  title: string;
+  description?: string;
+  startDate: string;
+  dueDate?: string | null;
+  durationValue?: number | null;
+  displayUnit?: 'DAY' | 'WEEK';
+};
+
+function isDate(value: string) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const parsed = parseDate(value);
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+}
+
+function validateDateRange(startDate: string, dueDate?: string | null) {
+  if (!isDate(startDate)) throw new Error('开始日期无效');
+  if (dueDate && !isDate(dueDate)) throw new Error('截止日期无效');
+  if (dueDate && dueDate < startDate) throw new Error('截止日期不能早于开始日期');
+}
+
+function normalizedDurationValue(
+  provided: number | null | undefined,
+  durationDays: number | null,
+  unit: 'DAY' | 'WEEK' | 'MONTH',
+) {
+  if (!durationDays) return null;
+  const divisor = unit === 'MONTH' ? 30 : unit === 'WEEK' ? 7 : 1;
+  if (
+    provided != null
+    && Number.isFinite(provided)
+    && provided > 0
+    && Math.ceil(provided * divisor) === durationDays
+  ) {
+    return provided;
+  }
+  return unit === 'DAY' ? durationDays : Number((durationDays / divisor).toFixed(2));
+}
 
 function matchesRule(date: string, rule: RecurrenceRow) {
   const difference = differenceInDays(date, rule.startDate);
@@ -187,6 +242,7 @@ export async function getPlannerData(upcomingDays = 14): Promise<PlannerData> {
         o.due_date AS dueDate,
         o.status,
         o.completed_at AS completedAt,
+        o.cancelled_at AS cancelledAt,
         g.id AS goalId,
         g.title AS goalTitle,
         p.id AS projectId,
@@ -209,6 +265,7 @@ export async function getPlannerData(upcomingDays = 14): Promise<PlannerData> {
 
   return {
     today,
+    timeZone,
     upcomingDays: normalizedRange,
     areas: areaResult.results,
     goals: goalResult.results,
@@ -227,19 +284,130 @@ async function getParentBounds(goalId: string, projectId?: string | null) {
       p.start_date AS projectStartDate,
       p.own_due_date AS projectDueDate
     FROM goals g
-    LEFT JOIN projects p ON p.id = ? AND p.goal_id = g.id
-    WHERE g.id = ? AND g.deleted_at IS NULL
+    LEFT JOIN projects p ON p.id = ? AND p.goal_id = g.id AND p.deleted_at IS NULL AND p.status = 'ACTIVE'
+    WHERE g.id = ? AND g.deleted_at IS NULL AND g.status = 'ACTIVE'
   `).bind(projectId ?? null, goalId).first<ParentBounds>();
   if (!bounds) throw new Error('目标不存在');
   if (projectId && !bounds.projectStartDate) throw new Error('项目不属于所选目标');
   return bounds;
 }
 
+export async function createArea(input: CreateAreaInput) {
+  const db = getDb();
+  const name = input.name.trim();
+  const color = input.color?.trim() || '#6366f1';
+  if (!name) throw new Error('请输入领域名称');
+  if (name.length > 60) throw new Error('领域名称不能超过 60 个字符');
+  if (!/^#[0-9a-fA-F]{6}$/.test(color)) throw new Error('领域颜色无效');
+
+  const duplicate = await db
+    .prepare('SELECT id FROM areas WHERE name = ? AND deleted_at IS NULL')
+    .bind(name)
+    .first();
+  if (duplicate) throw new Error('已经存在同名领域');
+
+  const sortOrder = await db
+    .prepare('SELECT COALESCE(MAX(sort_order), -1) + 1 AS value FROM areas WHERE deleted_at IS NULL')
+    .first<{ value: number }>();
+  const id = crypto.randomUUID();
+  const now = new Date().toISOString();
+  await db.prepare(`
+    INSERT INTO areas (id, name, color, sort_order, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).bind(id, name, color, Number(sortOrder?.value ?? 0), now, now).run();
+  return { id };
+}
+
+export async function createGoal(input: CreateGoalInput) {
+  const db = getDb();
+  const title = input.title.trim();
+  const dueDate = input.dueDate || null;
+  if (!title) throw new Error('请输入目标名称');
+  if (title.length > 120) throw new Error('目标名称不能超过 120 个字符');
+  validateDateRange(input.startDate, dueDate);
+
+  const area = await db
+    .prepare('SELECT id FROM areas WHERE id = ? AND deleted_at IS NULL AND archived_at IS NULL')
+    .bind(input.areaId)
+    .first();
+  if (!area) throw new Error('所属领域不存在');
+
+  const durationDays = dueDate ? differenceInDays(dueDate, input.startDate) + 1 : null;
+  const durationValue = normalizedDurationValue(input.durationValue, durationDays, 'MONTH');
+  const id = crypto.randomUUID();
+  const now = new Date().toISOString();
+  await db.prepare(`
+    INSERT INTO goals (
+      id, area_id, title, description, start_date, own_due_date,
+      duration_value, duration_days, display_unit, status,
+      sort_order, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'MONTH', 'ACTIVE', 999, ?, ?)
+  `).bind(
+    id,
+    input.areaId,
+    title,
+    input.description?.trim() ?? '',
+    input.startDate,
+    dueDate,
+    durationValue,
+    durationDays,
+    now,
+    now,
+  ).run();
+  return { id };
+}
+
+export async function createProject(input: CreateProjectInput) {
+  const db = getDb();
+  const title = input.title.trim();
+  const dueDate = input.dueDate || null;
+  const displayUnit = input.displayUnit === 'WEEK' ? 'WEEK' : 'DAY';
+  if (!title) throw new Error('请输入项目名称');
+  if (title.length > 120) throw new Error('项目名称不能超过 120 个字符');
+  validateDateRange(input.startDate, dueDate);
+
+  const goal = await db.prepare(`
+    SELECT start_date AS startDate, own_due_date AS dueDate
+    FROM goals
+    WHERE id = ? AND deleted_at IS NULL AND status = 'ACTIVE'
+  `).bind(input.goalId).first<{ startDate: string; dueDate: string | null }>();
+  if (!goal) throw new Error('所属目标不存在或不可用');
+  if (input.startDate < goal.startDate) throw new Error(`开始日期不能早于目标开始日期 ${goal.startDate}`);
+  if (goal.dueDate && input.startDate > goal.dueDate) throw new Error(`开始日期不能晚于目标边界 ${goal.dueDate}`);
+  if (goal.dueDate && dueDate && dueDate > goal.dueDate) throw new Error(`截止日期不能晚于目标边界 ${goal.dueDate}`);
+
+  const durationDays = dueDate ? differenceInDays(dueDate, input.startDate) + 1 : null;
+  const durationValue = normalizedDurationValue(input.durationValue, durationDays, displayUnit);
+  const id = crypto.randomUUID();
+  const now = new Date().toISOString();
+  await db.prepare(`
+    INSERT INTO projects (
+      id, goal_id, title, description, start_date, own_due_date,
+      duration_value, duration_days, display_unit, status,
+      sort_order, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVE', 999, ?, ?)
+  `).bind(
+    id,
+    input.goalId,
+    title,
+    input.description?.trim() ?? '',
+    input.startDate,
+    dueDate,
+    durationValue,
+    durationDays,
+    displayUnit,
+    now,
+    now,
+  ).run();
+  return { id };
+}
+
 export async function createTask(input: CreateTaskInput) {
   const db = getDb();
   const title = input.title.trim();
   if (!title) throw new Error('请输入任务名称');
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(input.startDate)) throw new Error('开始日期无效');
+  if (title.length > 120) throw new Error('任务名称不能超过 120 个字符');
+  if (!isDate(input.startDate)) throw new Error('开始日期无效');
 
   const bounds = await getParentBounds(input.goalId, input.projectId);
   const earliestStart = [bounds.goalStartDate, bounds.projectStartDate]
@@ -248,19 +416,33 @@ export async function createTask(input: CreateTaskInput) {
     .at(-1)!;
   const latestEnd = minDate(bounds.goalDueDate, bounds.projectDueDate);
   if (input.startDate < earliestStart) throw new Error(`开始日期不能早于 ${earliestStart}`);
+  if (latestEnd && input.startDate > latestEnd) throw new Error(`开始日期不能晚于上层边界 ${latestEnd}`);
 
   const recurrence = input.recurrence ?? 'NONE';
   const dueDate = input.dueDate || null;
   const recurrenceEndDate = input.recurrenceEndDate || null;
+  if (!['NONE', 'DAILY', 'WEEKLY'].includes(recurrence)) throw new Error('循环方式无效');
+  if (dueDate && !isDate(dueDate)) throw new Error('截止日期无效');
+  if (recurrenceEndDate && !isDate(recurrenceEndDate)) throw new Error('循环结束日期无效');
   if (dueDate && dueDate < input.startDate) throw new Error('截止日期不能早于开始日期');
+  if (recurrenceEndDate && recurrenceEndDate < input.startDate) throw new Error('循环结束日期不能早于开始日期');
   if (latestEnd && dueDate && dueDate > latestEnd) throw new Error(`截止日期不能晚于上层边界 ${latestEnd}`);
   if (latestEnd && recurrenceEndDate && recurrenceEndDate > latestEnd) throw new Error(`循环结束日期不能晚于上层边界 ${latestEnd}`);
 
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
-  const durationDays = recurrence === 'NONE' && dueDate ? differenceInDays(dueDate, input.startDate) + 1 : 1;
-  const displayUnit = input.displayUnit ?? 'DAY';
-  const durationValue = displayUnit === 'WEEK' ? Number((durationDays / 7).toFixed(2)) : durationDays;
+  const displayUnit = input.displayUnit === 'WEEK' ? 'WEEK' : 'DAY';
+  const providedDuration = input.durationValue ?? null;
+  if (providedDuration != null && (!Number.isFinite(providedDuration) || providedDuration <= 0)) {
+    throw new Error('预计时长必须大于 0');
+  }
+  if (displayUnit === 'DAY' && providedDuration != null && !Number.isInteger(providedDuration)) {
+    throw new Error('按日设置时，预计时长必须是整数');
+  }
+  const durationDays = recurrence === 'NONE'
+    ? dueDate ? differenceInDays(dueDate, input.startDate) + 1 : null
+    : providedDuration ? Math.ceil(providedDuration * (displayUnit === 'WEEK' ? 7 : 1)) : 1;
+  const durationValue = normalizedDurationValue(providedDuration, durationDays, displayUnit);
 
   const statements: D1PreparedStatement[] = [
     db.prepare(`
@@ -278,8 +460,8 @@ export async function createTask(input: CreateTaskInput) {
       input.description?.trim() ?? '',
       input.startDate,
       recurrence === 'NONE' ? dueDate : null,
-      dueDate || recurrence !== 'NONE' ? durationValue : null,
-      dueDate || recurrence !== 'NONE' ? durationDays : null,
+      durationValue,
+      durationDays,
       displayUnit,
       now,
       now,
@@ -295,7 +477,9 @@ export async function createTask(input: CreateTaskInput) {
       `).bind(crypto.randomUUID(), id, input.startDate, dueDate, now, now),
     );
   } else {
-    const interval = Math.max(Math.round(input.interval ?? 1), 1);
+    const rawInterval = input.interval ?? 1;
+    if (!Number.isInteger(rawInterval) || rawInterval < 1 || rawInterval > 99) throw new Error('循环间隔必须是 1 到 99 的整数');
+    const interval = rawInterval;
     const weekdays = recurrence === 'WEEKLY'
       ? JSON.stringify([parseDate(input.startDate).getUTCDay()])
       : null;

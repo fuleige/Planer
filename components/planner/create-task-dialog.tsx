@@ -15,6 +15,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
 import { Textarea } from '@/components/ui/textarea';
+import { addDays, differenceInDays } from '@/lib/date';
 import type { GoalSummary, ProjectSummary } from '@/lib/planner-types';
 
 type Props = {
@@ -25,6 +26,17 @@ type Props = {
   today: string;
   onCreated: () => Promise<void>;
 };
+
+function durationDays(value: string, unit: 'DAY' | 'WEEK') {
+  const amount = Number(value);
+  if (!Number.isFinite(amount) || amount <= 0) return null;
+  return Math.max(Math.ceil(amount * (unit === 'WEEK' ? 7 : 1)), 1);
+}
+
+function formatDuration(days: number, unit: 'DAY' | 'WEEK') {
+  if (unit === 'DAY') return String(days);
+  return (days / 7).toFixed(2).replace(/\.00$/, '').replace(/(\.\d)0$/, '$1');
+}
 
 export function CreateTaskDialog({
   open,
@@ -38,8 +50,12 @@ export function CreateTaskDialog({
   const [description, setDescription] = useState('');
   const [goalId, setGoalId] = useState(goals[0]?.id ?? '');
   const [projectId, setProjectId] = useState('');
-  const [startDate, setStartDate] = useState(today);
+  const [startDate, setStartDate] = useState(
+    goals[0]?.startDate && goals[0].startDate > today ? goals[0].startDate : today,
+  );
   const [dueDate, setDueDate] = useState('');
+  const [duration, setDuration] = useState('');
+  const [displayUnit, setDisplayUnit] = useState<'DAY' | 'WEEK'>('DAY');
   const [recurrence, setRecurrence] = useState<'NONE' | 'DAILY' | 'WEEKLY'>('NONE');
   const [interval, setInterval] = useState(1);
   const [recurrenceEndDate, setRecurrenceEndDate] = useState('');
@@ -51,16 +67,69 @@ export function CreateTaskDialog({
     [goalId, projects],
   );
 
+  const selectedGoal = useMemo(
+    () => goals.find((goal) => goal.id === goalId) ?? null,
+    [goalId, goals],
+  );
+  const selectedProject = useMemo(
+    () => projects.find((project) => project.id === projectId) ?? null,
+    [projectId, projects],
+  );
+  const earliestStart = [selectedGoal?.startDate, selectedProject?.startDate]
+    .filter((date): date is string => Boolean(date))
+    .sort()
+    .at(-1);
+  const latestEnd = [selectedGoal?.ownDueDate, selectedProject?.ownDueDate]
+    .filter((date): date is string => Boolean(date))
+    .sort()
+    .at(0);
+
   const reset = () => {
     setTitle('');
     setDescription('');
     setProjectId('');
-    setStartDate(today);
+    setStartDate(selectedGoal?.startDate && selectedGoal.startDate > today ? selectedGoal.startDate : today);
     setDueDate('');
+    setDuration('');
+    setDisplayUnit('DAY');
     setRecurrence('NONE');
     setInterval(1);
     setRecurrenceEndDate('');
     setError('');
+  };
+
+  const changeStartDate = (value: string) => {
+    setStartDate(value);
+    if (recurrence !== 'NONE') return;
+    const days = durationDays(duration, displayUnit);
+    if (value && days) setDueDate(addDays(value, days - 1));
+    else if (dueDate && dueDate < value) {
+      setDueDate('');
+      setDuration('');
+    }
+  };
+
+  const changeDuration = (value: string) => {
+    setDuration(value);
+    if (recurrence !== 'NONE') return;
+    const days = durationDays(value, displayUnit);
+    setDueDate(startDate && days ? addDays(startDate, days - 1) : '');
+  };
+
+  const changeDueDate = (value: string) => {
+    setDueDate(value);
+    if (!value || !startDate || value < startDate) {
+      setDuration('');
+      return;
+    }
+    setDuration(formatDuration(differenceInDays(value, startDate) + 1, displayUnit));
+  };
+
+  const changeDisplayUnit = (value: 'DAY' | 'WEEK') => {
+    setDisplayUnit(value);
+    if (recurrence === 'NONE' && startDate && dueDate && dueDate >= startDate) {
+      setDuration(formatDuration(differenceInDays(dueDate, startDate) + 1, value));
+    }
   };
 
   const submit = async (event: SyntheticEvent<HTMLFormElement>) => {
@@ -78,6 +147,8 @@ export function CreateTaskDialog({
           projectId: projectId || null,
           startDate,
           dueDate: recurrence === 'NONE' ? dueDate || null : null,
+          durationValue: duration ? Number(duration) : null,
+          displayUnit,
           recurrence,
           interval,
           recurrenceEndDate: recurrence === 'NONE' ? null : recurrenceEndDate || null,
@@ -114,6 +185,7 @@ export function CreateTaskDialog({
               value={title}
               onChange={(event) => setTitle(event.target.value)}
               placeholder="例如：完成移动端导航"
+              maxLength={120}
               required
             />
           </div>
@@ -126,8 +198,13 @@ export function CreateTaskDialog({
                 className="w-full"
                 value={goalId}
                 onChange={(event) => {
+                  const nextGoal = goals.find((goal) => goal.id === event.target.value);
                   setGoalId(event.target.value);
                   setProjectId('');
+                  setStartDate(nextGoal && nextGoal.startDate > today ? nextGoal.startDate : today);
+                  setDueDate('');
+                  setDuration('');
+                  setRecurrenceEndDate('');
                 }}
                 required
               >
@@ -142,7 +219,14 @@ export function CreateTaskDialog({
                 id="task-project"
                 className="w-full"
                 value={projectId}
-                onChange={(event) => setProjectId(event.target.value)}
+                onChange={(event) => {
+                  const nextProject = projects.find((project) => project.id === event.target.value);
+                  setProjectId(event.target.value);
+                  if (nextProject && nextProject.startDate > startDate) setStartDate(nextProject.startDate);
+                  setDueDate('');
+                  setDuration('');
+                  setRecurrenceEndDate('');
+                }}
               >
                 <NativeSelectOption value="">不属于项目</NativeSelectOption>
                 {availableProjects.map((project) => (
@@ -155,19 +239,45 @@ export function CreateTaskDialog({
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-2">
               <Label htmlFor="task-start">开始日期</Label>
-              <Input id="task-start" type="date" value={startDate} onChange={(event) => setStartDate(event.target.value)} required />
+              <Input id="task-start" type="date" min={earliestStart} max={latestEnd} value={startDate} onChange={(event) => changeStartDate(event.target.value)} required />
             </div>
+            <div className="space-y-2">
+              <Label htmlFor="task-duration">预计时长</Label>
+              <div className="grid grid-cols-[1fr_92px] gap-2">
+                <Input
+                  id="task-duration"
+                  type="number"
+                  min={displayUnit === 'DAY' ? 1 : 0.1}
+                  step={displayUnit === 'DAY' ? 1 : 0.1}
+                  value={duration}
+                  onChange={(event) => changeDuration(event.target.value)}
+                  placeholder={recurrence === 'NONE' ? '可选' : '默认 1'}
+                />
+                <NativeSelect aria-label="任务时长单位" value={displayUnit} onChange={(event) => changeDisplayUnit(event.target.value as 'DAY' | 'WEEK')}>
+                  <NativeSelectOption value="DAY">天</NativeSelectOption>
+                  <NativeSelectOption value="WEEK">周</NativeSelectOption>
+                </NativeSelect>
+              </div>
+            </div>
+          </div>
+
+          <div className="space-y-2">
             {recurrence === 'NONE' ? (
-              <div className="space-y-2">
+              <>
                 <Label htmlFor="task-due">截止日期</Label>
-                <Input id="task-due" type="date" min={startDate} value={dueDate} onChange={(event) => setDueDate(event.target.value)} />
-              </div>
+                <Input id="task-due" type="date" min={startDate} max={latestEnd} value={dueDate} onChange={(event) => changeDueDate(event.target.value)} />
+              </>
             ) : (
-              <div className="space-y-2">
+              <>
                 <Label htmlFor="task-repeat-end">循环结束日期</Label>
-                <Input id="task-repeat-end" type="date" min={startDate} value={recurrenceEndDate} onChange={(event) => setRecurrenceEndDate(event.target.value)} />
-              </div>
+                <Input id="task-repeat-end" type="date" min={startDate} max={latestEnd} value={recurrenceEndDate} onChange={(event) => setRecurrenceEndDate(event.target.value)} />
+              </>
             )}
+            <p className="text-xs leading-5 text-muted-foreground">
+              {recurrence === 'NONE'
+                ? '填写时长会自动计算截止日期，也可以直接修改截止日期；不填写则没有截止日期。'
+                : '预计时长用于计算每次循环的截止日期；不填写时每次按 1 天处理。'}
+            </p>
           </div>
 
           <div className="rounded-2xl border border-border bg-muted/35 p-4">
@@ -180,7 +290,16 @@ export function CreateTaskDialog({
                 id="task-recurrence"
                 className="w-full"
                 value={recurrence}
-                onChange={(event) => setRecurrence(event.target.value as typeof recurrence)}
+                onChange={(event) => {
+                  const nextRecurrence = event.target.value as typeof recurrence;
+                  setRecurrence(nextRecurrence);
+                  if (nextRecurrence === 'NONE') {
+                    const days = durationDays(duration, displayUnit);
+                    setDueDate(startDate && days ? addDays(startDate, days - 1) : '');
+                  } else {
+                    setDueDate('');
+                  }
+                }}
               >
                 <NativeSelectOption value="NONE">不循环</NativeSelectOption>
                 <NativeSelectOption value="DAILY">按日循环</NativeSelectOption>

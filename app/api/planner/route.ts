@@ -1,8 +1,12 @@
+import { protectApi } from '@/lib/auth';
 import { getPlannerData } from '@/lib/planner';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(request: Request) {
+  const denied = await protectApi(request);
+  if (denied) return denied;
+
   try {
     const url = new URL(request.url);
     const days = Number(url.searchParams.get('days') ?? 14);
