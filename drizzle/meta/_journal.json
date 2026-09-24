@@ -8,6 +8,13 @@
       "when": 1790073458009,
       "tag": "0000_init",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1790160687888,
+      "tag": "0001_weekly-cycle-and-area-dates",
+      "breakpoints": true
     }
   ]
 }

@@ -6,11 +6,13 @@ import { getPlannerData } from '@/lib/planner';
 
 export const dynamic = 'force-dynamic';
 
-export default async function Home() {
+export default async function Home({ searchParams }: { searchParams: Promise<{ view?: string | string[] }> }) {
   const requestHeaders = await headers();
   const auth = await getAuthStatus(requestHeaders.get('cookie'));
   if (!auth.authenticated) redirect('/login');
 
+  const requestedView = (await searchParams).view;
+  const initialView = requestedView === 'upcoming' || requestedView === 'plan' ? requestedView : 'today';
   const initialData = await getPlannerData(14);
-  return <PlannerApp initialData={initialData} />;
+  return <PlannerApp initialData={initialData} initialView={initialView} />;
 }

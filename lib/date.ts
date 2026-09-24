@@ -31,6 +31,11 @@ export function differenceInDays(later: string, earlier: string) {
   return Math.round((parseDate(later).getTime() - parseDate(earlier).getTime()) / DAY_MS);
 }
 
+export function weekStart(date: string) {
+  const weekday = parseDate(date).getUTCDay();
+  return addDays(date, -((weekday + 6) % 7));
+}
+
 export function minDate(...dates: Array<string | null | undefined>) {
   const validDates = dates.filter((date): date is string => Boolean(date));
   return validDates.length ? validDates.sort()[0] : null;

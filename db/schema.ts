@@ -9,6 +9,8 @@ export const areas = sqliteTable('areas', {
   id: text('id').primaryKey(),
   name: text('name').notNull(),
   color: text('color').notNull(),
+  startDate: text('start_date'),
+  ownDueDate: text('own_due_date'),
   sortOrder: integer('sort_order').notNull().default(0),
   archivedAt: text('archived_at'),
   deletedAt: text('deleted_at'),
@@ -101,8 +103,15 @@ export const recurrenceRules = sqliteTable('recurrence_rules', {
   ownEndDate: text('own_end_date'),
   generatedThroughDate: text('generated_through_date'),
   seriesStatus: text('series_status').notNull().default('ACTIVE'),
+  autoDeletedOverdueCount: integer('auto_deleted_overdue_count').notNull().default(0),
   ...timestamps,
 }, (table) => [uniqueIndex('uq_recurrence_rules_task').on(table.taskId)]);
+
+export const recurrenceWeekCompletions = sqliteTable('recurrence_week_completions', {
+  taskId: text('task_id').notNull().references(() => taskDefinitions.id, { onDelete: 'cascade' }),
+  weekStart: text('week_start').notNull(),
+  completedAt: text('completed_at').notNull(),
+}, (table) => [uniqueIndex('uq_recurrence_week_completions').on(table.taskId, table.weekStart)]);
 
 export const taskOccurrences = sqliteTable(
   'task_occurrences',

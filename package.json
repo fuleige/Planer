@@ -15,9 +15,10 @@
     "auth:show": "node scripts/manage-auth.mjs show",
     "auth:rotate": "node scripts/manage-auth.mjs rotate",
     "db:generate": "drizzle-kit generate",
-    "db:migrate:local": "wrangler d1 execute site-creator-d1 --local --file=drizzle/0000_init.sql --config wrangler.local.jsonc",
-    "db:seed:local": "wrangler d1 execute site-creator-d1 --local --file=db/seed-demo.sql --config wrangler.local.jsonc",
-    "db:setup:local": "npm run db:migrate:local && npm run db:seed:local",
+    "db:migrate:local": "wrangler d1 execute site-creator-d1 --local --persist-to .wrangler/state --file=drizzle/0000_init.sql --config wrangler.local.jsonc",
+    "db:upgrade:local": "wrangler d1 execute site-creator-d1 --local --persist-to .wrangler/state --file=drizzle/0001_weekly-cycle-and-area-dates.sql --config wrangler.local.jsonc",
+    "db:seed:local": "wrangler d1 execute site-creator-d1 --local --persist-to .wrangler/state --file=db/seed-demo.sql --config wrangler.local.jsonc",
+    "db:setup:local": "npm run db:migrate:local && npm run db:upgrade:local && npm run db:seed:local",
     "lint": "oxlint app components/auth components/planner db lib proxy.ts scripts",
     "format": "oxfmt"
   },

@@ -32,11 +32,13 @@ const args = [
   '--config',
   workerConfig,
   '--persist-to',
-  join(projectRoot, '.wrangler', 'state'),
+  process.env.PLANER_DB_STATE_DIR || join(projectRoot, '.wrangler', 'state'),
 ];
 
 if (process.argv.includes('--lan')) {
   args.push('--ip', '0.0.0.0', '--port', '3000');
+} else if (process.env.PLANER_PREVIEW_PORT) {
+  args.push('--ip', '127.0.0.1', '--port', process.env.PLANER_PREVIEW_PORT);
 }
 
 const child = spawn(wranglerBinary, args, {

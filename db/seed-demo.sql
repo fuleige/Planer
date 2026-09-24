@@ -1,10 +1,10 @@
 -- 演示数据只通过显式种子命令写入数据库；应用运行时不会自动创建这些记录。
 -- 中国时区全年为 UTC+8，因此使用 +8 hours 生成相对“今天”的演示日期。
 
-INSERT OR IGNORE INTO areas (id, name, color, sort_order, created_at, updated_at) VALUES
-  ('area-work', '工作', '#6366f1', 0, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-  ('area-health', '健康', '#10b981', 1, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-  ('area-growth', '成长', '#f59e0b', 2, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));
+INSERT OR IGNORE INTO areas (id, name, color, start_date, sort_order, created_at, updated_at) VALUES
+  ('area-work', '工作', '#6366B8', date('now', '+8 hours', '-14 days'), 0, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+  ('area-health', '健康', '#10b981', date('now', '+8 hours', '-30 days'), 1, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+  ('area-growth', '成长', '#f59e0b', date('now', '+8 hours', '-20 days'), 2, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));
 
 INSERT OR IGNORE INTO goals (
   id, area_id, title, start_date, own_due_date, duration_value, duration_days,

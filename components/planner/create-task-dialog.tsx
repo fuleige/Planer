@@ -16,14 +16,19 @@ import { Label } from '@/components/ui/label';
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
 import { Textarea } from '@/components/ui/textarea';
 import { addDays, differenceInDays } from '@/lib/date';
-import type { GoalSummary, ProjectSummary } from '@/lib/planner-types';
+import type { AreaSummary, GoalSummary, ProjectSummary, TaskDefinitionSummary } from '@/lib/planner-types';
 
 type Props = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   goals: GoalSummary[];
+  areas: AreaSummary[];
   projects: ProjectSummary[];
   today: string;
+  editing?: TaskDefinitionSummary;
+  initialGoalId?: string;
+  initialProjectId?: string;
+  scheduleLocked?: boolean;
   onCreated: () => Promise<void>;
 };
 
@@ -42,23 +47,31 @@ export function CreateTaskDialog({
   open,
   onOpenChange,
   goals,
+  areas,
   projects,
   today,
+  editing,
+  initialGoalId,
+  initialProjectId,
+  scheduleLocked = false,
   onCreated,
 }: Props) {
-  const [title, setTitle] = useState('');
-  const [description, setDescription] = useState('');
-  const [goalId, setGoalId] = useState(goals[0]?.id ?? '');
-  const [projectId, setProjectId] = useState('');
+  const [title, setTitle] = useState(editing?.title ?? '');
+  const [description, setDescription] = useState(editing?.description ?? '');
+  const [goalId, setGoalId] = useState(editing?.goalId ?? initialGoalId ?? goals[0]?.id ?? '');
+  const [projectId, setProjectId] = useState(editing?.projectId ?? initialProjectId ?? '');
+  const initialGoal = goals.find((goal) => goal.id === (editing?.goalId ?? initialGoalId ?? goals[0]?.id));
+  const initialArea = areas.find((area) => area.id === initialGoal?.areaId);
+  const initialProject = projects.find((project) => project.id === (editing?.projectId ?? initialProjectId));
   const [startDate, setStartDate] = useState(
-    goals[0]?.startDate && goals[0].startDate > today ? goals[0].startDate : today,
+    editing?.startDate ?? [today, initialArea?.startDate, initialGoal?.startDate, initialProject?.startDate].filter((date): date is string => Boolean(date)).sort().at(-1) ?? today,
   );
-  const [dueDate, setDueDate] = useState('');
-  const [duration, setDuration] = useState('');
-  const [displayUnit, setDisplayUnit] = useState<'DAY' | 'WEEK'>('DAY');
-  const [recurrence, setRecurrence] = useState<'NONE' | 'DAILY' | 'WEEKLY'>('NONE');
-  const [interval, setInterval] = useState(1);
-  const [recurrenceEndDate, setRecurrenceEndDate] = useState('');
+  const [dueDate, setDueDate] = useState(editing?.ownDueDate ?? '');
+  const [duration, setDuration] = useState(() => editing?.durationValue != null ? String(editing.durationValue) : editing?.durationDays && editing.type === 'ONE_TIME' ? formatDuration(editing.durationDays, editing.displayUnit) : '');
+  const [displayUnit, setDisplayUnit] = useState<'DAY' | 'WEEK'>(editing?.displayUnit ?? 'DAY');
+  const [recurrence, setRecurrence] = useState<'NONE' | 'DAILY' | 'WEEKLY'>(editing?.frequency ?? 'NONE');
+  const [interval, setInterval] = useState(editing?.interval ?? 1);
+  const [recurrenceEndDate, setRecurrenceEndDate] = useState(editing?.ownEndDate ?? '');
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
@@ -71,15 +84,16 @@ export function CreateTaskDialog({
     () => goals.find((goal) => goal.id === goalId) ?? null,
     [goalId, goals],
   );
+  const selectedArea = areas.find((area) => area.id === selectedGoal?.areaId);
   const selectedProject = useMemo(
     () => projects.find((project) => project.id === projectId) ?? null,
     [projectId, projects],
   );
-  const earliestStart = [selectedGoal?.startDate, selectedProject?.startDate]
+  const earliestStart = [selectedArea?.startDate, selectedGoal?.startDate, selectedProject?.startDate]
     .filter((date): date is string => Boolean(date))
     .sort()
     .at(-1);
-  const latestEnd = [selectedGoal?.ownDueDate, selectedProject?.ownDueDate]
+  const latestEnd = [selectedArea?.ownDueDate, selectedGoal?.ownDueDate, selectedProject?.ownDueDate]
     .filter((date): date is string => Boolean(date))
     .sort()
     .at(0);
@@ -88,7 +102,7 @@ export function CreateTaskDialog({
     setTitle('');
     setDescription('');
     setProjectId('');
-    setStartDate(selectedGoal?.startDate && selectedGoal.startDate > today ? selectedGoal.startDate : today);
+    setStartDate([today, selectedArea?.startDate, selectedGoal?.startDate].filter((date): date is string => Boolean(date)).sort().at(-1) ?? today);
     setDueDate('');
     setDuration('');
     setDisplayUnit('DAY');
@@ -137,8 +151,8 @@ export function CreateTaskDialog({
     setError('');
     setSubmitting(true);
     try {
-      const response = await fetch('/api/tasks', {
-        method: 'POST',
+      const response = await fetch(editing ? `/api/tasks/${editing.id}` : '/api/tasks', {
+        method: editing ? 'PATCH' : 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
           title,
@@ -155,12 +169,12 @@ export function CreateTaskDialog({
         }),
       });
       const result = (await response.json()) as { error?: string };
-      if (!response.ok) throw new Error(result.error || '无法创建任务');
+      if (!response.ok) throw new Error(result.error || `无法${editing ? '修改' : '创建'}任务`);
       await onCreated();
       reset();
       onOpenChange(false);
     } catch (submitError) {
-      setError(submitError instanceof Error ? submitError.message : '无法创建任务');
+      setError(submitError instanceof Error ? submitError.message : `无法${editing ? '修改' : '创建'}任务`);
     } finally {
       setSubmitting(false);
     }
@@ -173,8 +187,8 @@ export function CreateTaskDialog({
           <div className="mb-1 grid size-10 place-items-center rounded-xl bg-primary/10 text-primary">
             <CalendarPlus className="size-5" />
           </div>
-          <DialogTitle className="text-lg">新建任务</DialogTitle>
-          <DialogDescription>任务必须属于一个目标，项目可以不选择。</DialogDescription>
+          <DialogTitle className="text-lg">{editing ? '编辑任务' : '新建任务'}</DialogTitle>
+          <DialogDescription>{editing?.type === 'RECURRING' ? '已有今天或更早实例的循环任务只能修改名称和备注，以保留历史。' : '任务必须属于一个目标，项目可以不选择。'}</DialogDescription>
         </DialogHeader>
 
         <form id="create-task-form" className="space-y-5" onSubmit={submit}>
@@ -197,11 +211,13 @@ export function CreateTaskDialog({
                 id="task-goal"
                 className="w-full"
                 value={goalId}
+                disabled={scheduleLocked}
                 onChange={(event) => {
                   const nextGoal = goals.find((goal) => goal.id === event.target.value);
                   setGoalId(event.target.value);
                   setProjectId('');
-                  setStartDate(nextGoal && nextGoal.startDate > today ? nextGoal.startDate : today);
+                  const nextArea = areas.find((area) => area.id === nextGoal?.areaId);
+                  setStartDate([today, nextArea?.startDate, nextGoal?.startDate].filter((date): date is string => Boolean(date)).sort().at(-1) ?? today);
                   setDueDate('');
                   setDuration('');
                   setRecurrenceEndDate('');
@@ -219,6 +235,7 @@ export function CreateTaskDialog({
                 id="task-project"
                 className="w-full"
                 value={projectId}
+                disabled={scheduleLocked}
                 onChange={(event) => {
                   const nextProject = projects.find((project) => project.id === event.target.value);
                   setProjectId(event.target.value);
@@ -239,7 +256,7 @@ export function CreateTaskDialog({
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-2">
               <Label htmlFor="task-start">开始日期</Label>
-              <Input id="task-start" type="date" min={earliestStart} max={latestEnd} value={startDate} onChange={(event) => changeStartDate(event.target.value)} required />
+              <Input id="task-start" type="date" min={earliestStart} max={latestEnd} value={startDate} onChange={(event) => changeStartDate(event.target.value)} disabled={scheduleLocked} required />
             </div>
             <div className="space-y-2">
               <Label htmlFor="task-duration">预计时长</Label>
@@ -247,13 +264,14 @@ export function CreateTaskDialog({
                 <Input
                   id="task-duration"
                   type="number"
-                  min={displayUnit === 'DAY' ? 1 : 0.1}
-                  step={displayUnit === 'DAY' ? 1 : 0.1}
+                  min={displayUnit === 'DAY' ? 1 : 0.01}
+                  step={displayUnit === 'DAY' ? 1 : 0.01}
                   value={duration}
+                  disabled={scheduleLocked}
                   onChange={(event) => changeDuration(event.target.value)}
                   placeholder={recurrence === 'NONE' ? '可选' : '默认 1'}
                 />
-                <NativeSelect aria-label="任务时长单位" value={displayUnit} onChange={(event) => changeDisplayUnit(event.target.value as 'DAY' | 'WEEK')}>
+                <NativeSelect aria-label="任务时长单位" value={displayUnit} disabled={scheduleLocked} onChange={(event) => changeDisplayUnit(event.target.value as 'DAY' | 'WEEK')}>
                   <NativeSelectOption value="DAY">天</NativeSelectOption>
                   <NativeSelectOption value="WEEK">周</NativeSelectOption>
                 </NativeSelect>
@@ -265,18 +283,19 @@ export function CreateTaskDialog({
             {recurrence === 'NONE' ? (
               <>
                 <Label htmlFor="task-due">截止日期</Label>
-                <Input id="task-due" type="date" min={startDate} max={latestEnd} value={dueDate} onChange={(event) => changeDueDate(event.target.value)} />
+                <Input id="task-due" type="date" min={startDate} max={latestEnd} value={dueDate} onChange={(event) => changeDueDate(event.target.value)} disabled={scheduleLocked} />
               </>
             ) : (
               <>
                 <Label htmlFor="task-repeat-end">循环结束日期</Label>
-                <Input id="task-repeat-end" type="date" min={startDate} max={latestEnd} value={recurrenceEndDate} onChange={(event) => setRecurrenceEndDate(event.target.value)} />
+                <Input id="task-repeat-end" type="date" min={startDate} max={latestEnd} value={recurrenceEndDate} onChange={(event) => setRecurrenceEndDate(event.target.value)} disabled={scheduleLocked} />
               </>
             )}
             <p className="text-xs leading-5 text-muted-foreground">
               {recurrence === 'NONE'
                 ? '填写时长会自动计算截止日期，也可以直接修改截止日期；不填写则没有截止日期。'
-                : '预计时长用于计算每次循环的截止日期；不填写时每次按 1 天处理。'}
+                : recurrence === 'WEEKLY' ? '按周循环会在命中周的每天提醒；预计时长仅作工作量参考，今日未处理会在明天成为逾期。'
+                  : '预计时长用于计算每次循环的截止日期；不填写时每次按 1 天处理。'}
             </p>
           </div>
 
@@ -290,6 +309,7 @@ export function CreateTaskDialog({
                 id="task-recurrence"
                 className="w-full"
                 value={recurrence}
+                disabled={Boolean(editing) || scheduleLocked}
                 onChange={(event) => {
                   const nextRecurrence = event.target.value as typeof recurrence;
                   setRecurrence(nextRecurrence);
@@ -314,6 +334,7 @@ export function CreateTaskDialog({
                     min={1}
                     max={99}
                     value={interval}
+                    disabled={scheduleLocked}
                     onChange={(event) => setInterval(Number(event.target.value))}
                   />
                   <span className="whitespace-nowrap text-xs text-muted-foreground">{recurrence === 'DAILY' ? '天' : '周'}</span>
@@ -343,7 +364,7 @@ export function CreateTaskDialog({
           <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>取消</Button>
           <Button type="submit" form="create-task-form" disabled={submitting || !title.trim() || !goalId}>
             {submitting ? <Loader2 className="size-4 animate-spin" /> : null}
-            创建任务
+            {editing ? '保存修改' : '创建任务'}
           </Button>
         </DialogFooter>
       </DialogContent>

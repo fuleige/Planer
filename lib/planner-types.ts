@@ -5,7 +5,14 @@ export type PlannerOccurrence = {
   taskId: string;
   title: string;
   description: string;
+  taskStartDate: string;
+  taskOwnDueDate: string | null;
+  recurrenceEndDate: string | null;
+  areaDueDate: string | null;
+  goalDueDate: string | null;
+  projectDueDate: string | null;
   type: 'ONE_TIME' | 'RECURRING';
+  definitionStatus: 'ACTIVE' | 'STOPPED' | 'CANCELLED';
   scheduledDate: string;
   dueDate: string | null;
   status: TaskStatus;
@@ -26,6 +33,8 @@ export type AreaSummary = {
   id: string;
   name: string;
   color: string;
+  startDate: string;
+  ownDueDate: string | null;
   taskCount: number;
 };
 
@@ -33,18 +42,29 @@ export type GoalSummary = {
   id: string;
   areaId: string;
   title: string;
+  description: string;
   startDate: string;
   ownDueDate: string | null;
+  durationValue: number | null;
   status: 'ACTIVE' | 'COMPLETED' | 'ABANDONED';
+  completedAt: string | null;
+  abandonedAt: string | null;
+  canComplete: boolean;
 };
 
 export type ProjectSummary = {
   id: string;
   goalId: string;
   title: string;
+  description: string;
   startDate: string;
   ownDueDate: string | null;
+  durationValue: number | null;
+  displayUnit: 'DAY' | 'WEEK';
   status: 'ACTIVE' | 'COMPLETED' | 'ABANDONED';
+  completedAt: string | null;
+  abandonedAt: string | null;
+  canComplete: boolean;
 };
 
 export type TaskDefinitionSummary = {
@@ -52,6 +72,7 @@ export type TaskDefinitionSummary = {
   goalId: string;
   projectId: string | null;
   title: string;
+  description: string;
   type: 'ONE_TIME' | 'RECURRING';
   startDate: string;
   ownDueDate: string | null;
@@ -61,10 +82,14 @@ export type TaskDefinitionSummary = {
   definitionStatus: 'ACTIVE' | 'STOPPED' | 'CANCELLED';
   pendingCount: number;
   completedCount: number;
+  completedWeekCount: number;
   cancelledCount: number;
+  lastHandledAt: string | null;
   frequency: 'DAILY' | 'WEEKLY' | null;
   interval: number | null;
   ownEndDate: string | null;
+  autoDeletedOverdueCount: number;
+  currentWeekCompleted: boolean;
 };
 
 export type PlannerData = {
