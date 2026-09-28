@@ -1,6 +1,6 @@
 'use client';
 
-import { Ban, MoreHorizontal, PauseCircle, Pencil, PlayCircle, Repeat2, RotateCcw, Trash2 } from 'lucide-react';
+import { Ban, CalendarClock, MoreHorizontal, PauseCircle, Pencil, PlayCircle, Repeat2, RotateCcw, Trash2 } from 'lucide-react';
 import { Checkbox } from '@/components/ui/checkbox';
 import { CompactAction } from '@/components/planner/compact-action';
 import {
@@ -21,6 +21,7 @@ type Props = {
   onDeleteTask?: (id: string) => void;
   onCycleChange?: (id: string, running: boolean) => void;
   onClearOverdue?: (id: string) => void;
+  onRescheduleOverdue?: (id: string) => void;
   onWeekComplete?: (id: string) => void;
   todayMode?: 'PENDING' | 'HANDLED';
   undoBlockedReason?: string | null;
@@ -47,7 +48,7 @@ function taskMeta(occurrence: PlannerOccurrence, today: string) {
   return `${shortDate(occurrence.dueDate)} 截止`;
 }
 
-export function TaskRow({ occurrence, today, onStatusChange, onEditTask, onDeleteTask, onCycleChange, onClearOverdue, onWeekComplete, todayMode, undoBlockedReason, onGoToPlan, compact = false }: Props) {
+export function TaskRow({ occurrence, today, onStatusChange, onEditTask, onDeleteTask, onCycleChange, onClearOverdue, onRescheduleOverdue, onWeekComplete, todayMode, undoBlockedReason, onGoToPlan, compact = false }: Props) {
   const completed = occurrence.status === 'COMPLETED';
   const cancelled = occurrence.status === 'CANCELLED';
   const overdue = occurrence.status === 'PENDING' && Boolean(occurrence.dueDate && occurrence.dueDate < today);
@@ -97,7 +98,7 @@ export function TaskRow({ occurrence, today, onStatusChange, onEditTask, onDelet
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="min-w-36">
             {overdue ? (
-              onClearOverdue ? <DropdownMenuItem variant="destructive" onClick={() => onClearOverdue(occurrence.id)}><Trash2 />清理逾期</DropdownMenuItem> : null
+              onClearOverdue ? <DropdownMenuItem variant="destructive" onClick={() => onClearOverdue(occurrence.id)}><Trash2 />{occurrence.type === 'RECURRING' ? '删除本条逾期' : '删除任务'}</DropdownMenuItem> : null
             ) : (
               <>
                 {onEditTask ? <DropdownMenuItem onClick={() => onEditTask(occurrence.taskId)}><Pencil />编辑任务</DropdownMenuItem> : null}
@@ -120,6 +121,9 @@ export function TaskRow({ occurrence, today, onStatusChange, onEditTask, onDelet
           </DropdownMenuContent>
         </DropdownMenu> : null}
       </div>
+      {overdue && occurrence.type === 'ONE_TIME' && onRescheduleOverdue ? <div className="mt-1 pl-6">
+        <CompactAction icon={CalendarClock} onClick={() => onRescheduleOverdue(occurrence.id)}>重设截止日期</CompactAction>
+      </div> : null}
       {todayMode === 'PENDING' ? <div className="mt-1 flex flex-wrap items-center gap-0.5 pl-7 sm:pl-8">
         <CompactAction icon={Ban} onClick={() => onStatusChange(occurrence.id, 'CANCELLED')}>{occurrence.type === 'RECURRING' ? '今日跳过' : '取消任务'}</CompactAction>
         {occurrence.frequency === 'WEEKLY' && onWeekComplete ? <CompactAction icon={Repeat2} tone="indigo" onClick={() => onWeekComplete(occurrence.taskId)}>本周完成</CompactAction> : null}

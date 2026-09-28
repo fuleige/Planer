@@ -1,13 +1,13 @@
 'use client';
 
 import { useState } from 'react';
-import { Ban, Check, Loader2, RotateCcw, Trash2 } from 'lucide-react';
+import { Ban, CalendarClock, Check, Loader2, RotateCcw, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { weekStart } from '@/lib/date';
 import type { PlannerOccurrence, TaskDefinitionSummary, TaskStatus } from '@/lib/planner-types';
 
-export function TaskInstancesDialog({ task, occurrences, parentBlockedReason, today, onClose, onStatusChange, onClearOverdue, onGoToPlan }: {
+export function TaskInstancesDialog({ task, occurrences, parentBlockedReason, today, onClose, onStatusChange, onClearOverdue, onRescheduleOverdue, onGoToPlan }: {
   task: TaskDefinitionSummary;
   occurrences: PlannerOccurrence[];
   parentBlockedReason: string | null;
@@ -15,6 +15,7 @@ export function TaskInstancesDialog({ task, occurrences, parentBlockedReason, to
   onClose: () => void;
   onStatusChange: (id: string, status: TaskStatus) => Promise<{ ok: boolean; error?: string }>;
   onClearOverdue: (id: string) => void;
+  onRescheduleOverdue: (id: string) => void;
   onGoToPlan: () => void;
 }) {
   const [filter, setFilter] = useState<'PENDING' | 'HANDLED'>('PENDING');
@@ -59,10 +60,13 @@ export function TaskInstancesDialog({ task, occurrences, parentBlockedReason, to
             <div key={item.id} className="flex flex-wrap items-center gap-3 rounded-xl border border-border p-3">
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-medium">{item.scheduledDate}{item.dueDate && item.dueDate !== item.scheduledDate ? ` — ${item.dueDate}` : ''}</p>
-                <p className="mt-0.5 text-xs text-muted-foreground">{item.status === 'PENDING' ? item.dueDate && item.dueDate < today ? '已逾期 · 仅可清理' : item.dueDate ? '待处理' : '无截止日期 · 待处理' : item.status === 'COMPLETED' ? '已完成' : '已取消'}</p>
+                <p className="mt-0.5 text-xs text-muted-foreground">{item.status === 'PENDING' ? item.dueDate && item.dueDate < today ? task.type === 'ONE_TIME' ? '已逾期 · 可改期或删除' : '已逾期 · 仅可删除本条' : item.dueDate ? '待处理' : '无截止日期 · 待处理' : item.status === 'COMPLETED' ? '已完成' : '已取消'}</p>
               </div>
               {busyId === item.id ? <Loader2 className="size-4 animate-spin text-muted-foreground" /> : item.status === 'PENDING' && item.dueDate && item.dueDate < today ? (
-                <Button size="sm" variant="destructive" onClick={() => { onClose(); onClearOverdue(item.id); }}><Trash2 className="size-4" />清理逾期</Button>
+                <div className="flex flex-wrap gap-2">
+                  {task.type === 'ONE_TIME' ? <Button size="sm" variant="outline" onClick={() => { onClose(); onRescheduleOverdue(item.id); }}><CalendarClock className="size-4" />重设截止日期</Button> : null}
+                  <Button size="sm" variant="destructive" onClick={() => { onClose(); onClearOverdue(item.id); }}><Trash2 className="size-4" />{task.type === 'ONE_TIME' ? '删除任务' : '删除本条逾期'}</Button>
+                </div>
               ) : item.status === 'PENDING' ? (
                 <div className="flex gap-2">
                   <Button size="sm" disabled={Boolean(busyId) || Boolean(parentBlockedReason)} onClick={() => void change(item.id, 'COMPLETED')}><Check className="size-4" />完成</Button>

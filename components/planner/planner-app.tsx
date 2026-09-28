@@ -33,6 +33,7 @@ import { CreateTaskDialog } from '@/components/planner/create-task-dialog';
 import { TrashDialog } from '@/components/planner/trash-dialog';
 import { TaskRow, TaskRowSkeleton } from '@/components/planner/task-row';
 import { TaskInstancesDialog } from '@/components/planner/task-instances-dialog';
+import { RescheduleOverdueDialog } from '@/components/planner/reschedule-overdue-dialog';
 import { WeeklyHandledCard } from '@/components/planner/weekly-handled-card';
 import { PlannerWebMcpTools } from '@/components/planner/webmcp-tools';
 import { Badge } from '@/components/ui/badge';
@@ -152,6 +153,7 @@ export function PlannerApp({ initialData, initialView = 'today' }: { initialData
   const [newStructureRequest, setNewStructureRequest] = useState<NewStructureRequest | null>(null);
   const [trashOpen, setTrashOpen] = useState(false);
   const [instancesTaskId, setInstancesTaskId] = useState<string | null>(null);
+  const [rescheduleOccurrenceId, setRescheduleOccurrenceId] = useState<string | null>(null);
   const [actionTarget, setActionTarget] = useState<ActionTarget | null>(null);
   const [actionError, setActionError] = useState('');
   const [acting, setActing] = useState(false);
@@ -320,7 +322,15 @@ export function PlannerApp({ initialData, initialView = 'today' }: { initialData
     const occurrence = data?.occurrences.find((item) => item.id === id);
     if (!occurrence) return;
     setActionError('');
-    setActionTarget({ kind: 'OCCURRENCE', id, title: `${occurrence.title}（${occurrence.scheduledDate}）`, action: 'CLEAR' });
+    setActionTarget({ kind: 'OCCURRENCE', id, title: `${occurrence.title}（${occurrence.dueDate ?? occurrence.scheduledDate}）`, action: 'CLEAR' });
+  };
+
+  const openRescheduleOverdue = (id: string) => {
+    if (!data) return;
+    const occurrence = data.occurrences.find((item) => item.id === id);
+    if (occurrence?.type === 'ONE_TIME' && occurrence.status === 'PENDING' && occurrence.dueDate && occurrence.dueDate < data.today) {
+      setRescheduleOccurrenceId(id);
+    }
   };
 
   const openWeekCompleteAction = (id: string) => {
@@ -365,7 +375,7 @@ export function PlannerApp({ initialData, initialView = 'today' }: { initialData
       });
       const result = (await response.json()) as { error?: string };
       if (!response.ok) throw new Error(result.error || '无法完成操作');
-      const notice = actionTarget.action === 'CLEAR' ? '逾期记录已清理'
+      const notice = actionTarget.action === 'CLEAR' ? data?.occurrences.find((item) => item.id === actionTarget.id)?.type === 'ONE_TIME' ? '逾期任务已删除，可从回收站恢复' : '本条循环逾期已删除'
         : actionTarget.action === 'WEEK_COMPLETE' ? '本周已完成，今日不会计为完成'
         : actionTarget.action === 'STOP' ? '循环已停止，历史实例仍保留'
         : actionTarget.action === 'RESUME' ? '循环已恢复'
@@ -422,6 +432,8 @@ export function PlannerApp({ initialData, initialView = 'today' }: { initialData
   const activeGoals = data?.goals.filter((goal) => goal.status === 'ACTIVE') ?? [];
   const activeProjects = data?.projects.filter((project) => project.status === 'ACTIVE') ?? [];
   const instancesTask = data?.taskDefinitions.find((task) => task.id === instancesTaskId);
+  const rescheduleOccurrence = data?.occurrences.find((item) => item.id === rescheduleOccurrenceId);
+  const clearTargetOccurrence = actionTarget?.action === 'CLEAR' ? data?.occurrences.find((item) => item.id === actionTarget.id) : null;
 
   const logout = async () => {
     setLoggingOut(true);
@@ -563,7 +575,7 @@ export function PlannerApp({ initialData, initialView = 'today' }: { initialData
           ) : null}
 
           {activeView === 'today' ? (
-            <TodayView data={data} loading={loading} derived={derived} onStatusChange={changeStatus} onClearOverdue={clearOverdue} onWeekComplete={openWeekCompleteAction} onWeekUndo={(id) => void changeWeekCompletion(id, false)} onEditTask={(id) => setEditTarget({ kind: 'TASK', id })} onDeleteTask={(id) => openDelete({ kind: 'TASK', id })} onCycleChange={openCycleAction} onGoToPlan={() => navigateView('plan')} onOpenUpcoming={() => navigateView('upcoming')} />
+            <TodayView data={data} loading={loading} derived={derived} onStatusChange={changeStatus} onClearOverdue={clearOverdue} onRescheduleOverdue={openRescheduleOverdue} onWeekComplete={openWeekCompleteAction} onWeekUndo={(id) => void changeWeekCompletion(id, false)} onEditTask={(id) => setEditTarget({ kind: 'TASK', id })} onDeleteTask={(id) => openDelete({ kind: 'TASK', id })} onCycleChange={openCycleAction} onGoToPlan={() => navigateView('plan')} onOpenUpcoming={() => navigateView('upcoming')} />
           ) : null}
           {activeView === 'upcoming' ? (
             <UpcomingView data={data} loading={loading} occurrences={derived.upcoming} upcomingDays={upcomingDays} onRangeChange={changeUpcomingRange} onStatusChange={changeStatus} onEditTask={(id) => setEditTarget({ kind: 'TASK', id })} onDeleteTask={(id) => openDelete({ kind: 'TASK', id })} onCycleChange={openCycleAction} />
@@ -684,8 +696,22 @@ export function PlannerApp({ initialData, initialView = 'today' }: { initialData
         onClose={() => setInstancesTaskId(null)}
         onStatusChange={changeStatus}
         onClearOverdue={clearOverdue}
+        onRescheduleOverdue={openRescheduleOverdue}
         onGoToPlan={() => { setInstancesTaskId(null); navigateView('plan'); }}
         today={data.today}
+      /> : null}
+      {data && rescheduleOccurrence ? <RescheduleOverdueDialog
+        key={rescheduleOccurrence.id}
+        occurrence={rescheduleOccurrence}
+        today={data.today}
+        parentBlockedReason={parentBlockReason(data, rescheduleOccurrence.goalId, rescheduleOccurrence.projectId)}
+        onClose={() => setRescheduleOccurrenceId(null)}
+        onSaved={async () => {
+          setRescheduleOccurrenceId(null);
+          await refresh();
+          showNotice('截止日期已更新，任务仍待处理');
+        }}
+        onGoToPlan={() => { setRescheduleOccurrenceId(null); navigateView('plan'); }}
       /> : null}
       <TrashDialog open={trashOpen} onOpenChange={setTrashOpen} onRestored={async (kind) => {
         await refresh();
@@ -694,7 +720,7 @@ export function PlannerApp({ initialData, initialView = 'today' }: { initialData
       <AlertDialog open={Boolean(actionTarget)} onOpenChange={(open) => { if (!open && !acting) setActionTarget(null); }}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>{actionTarget?.action === 'CLEAR' ? '清理逾期记录' : actionTarget?.action === 'WEEK_COMPLETE' ? '确认本周完成' : actionTarget?.action === 'STOP' ? '停止循环' : actionTarget?.action === 'RESUME' ? '恢复循环' : actionTarget?.action === 'COMPLETE' ? '确认完成' : actionTarget?.action === 'ABANDON' ? '放弃' : actionTarget?.action === 'RESTORE' ? '恢复' : '重新打开'}“{actionTarget?.title ?? ''}”？</AlertDialogTitle>
+            <AlertDialogTitle>{actionTarget?.action === 'CLEAR' ? clearTargetOccurrence?.type === 'ONE_TIME' ? '删除逾期任务' : '删除本条循环逾期' : actionTarget?.action === 'WEEK_COMPLETE' ? '确认本周完成' : actionTarget?.action === 'STOP' ? '停止循环' : actionTarget?.action === 'RESUME' ? '恢复循环' : actionTarget?.action === 'COMPLETE' ? '确认完成' : actionTarget?.action === 'ABANDON' ? '放弃' : actionTarget?.action === 'RESTORE' ? '恢复' : '重新打开'}“{actionTarget?.title ?? ''}”？</AlertDialogTitle>
             <AlertDialogDescription>
               {actionTarget?.action === 'CLEAR' ? '清理后这条逾期不再显示。普通任务可从回收站恢复；循环任务的单次记录无法恢复。'
                 : actionTarget?.action === 'WEEK_COMPLETE' ? '这会记为一次周级完成成果，本周剩余日期不再提醒；不会自动完成今天，也不会清理原有逾期。可在“已处理 · 本周循环”撤回。'
@@ -804,6 +830,7 @@ function TodayView({
   derived,
   onStatusChange,
   onClearOverdue,
+  onRescheduleOverdue,
   onWeekComplete,
   onWeekUndo,
   onEditTask,
@@ -817,6 +844,7 @@ function TodayView({
   derived: { overdue: PlannerOccurrence[]; today: PlannerOccurrence[]; completedToday: PlannerOccurrence[]; weeklyHandled: Array<{ task: TaskDefinitionSummary; occurrence?: PlannerOccurrence }>; otherHandled: PlannerOccurrence[]; upcoming: PlannerOccurrence[]; undated: TaskDefinitionSummary[] };
   onStatusChange: (id: string, status: TaskStatus) => void;
   onClearOverdue: (id: string) => void;
+  onRescheduleOverdue: (id: string) => void;
   onWeekComplete: (id: string) => void;
   onWeekUndo: (id: string) => void;
   onEditTask: (id: string) => void;
@@ -838,13 +866,13 @@ function TodayView({
               <span className="grid size-9 place-items-center rounded-xl bg-red-50 text-red-600"><CircleAlert className="size-[18px]" /></span>
               <span className="min-w-0 flex-1">
                 <span className="block text-sm font-semibold text-red-950">{derived.overdue.length} 项任务已逾期</span>
-                <span className="mt-0.5 block truncate text-xs text-red-700/75">逾期仅可手动清理；循环任务超过 16 条时自动清理最早记录</span>
+                <span className="mt-0.5 block truncate text-xs text-red-700/75">普通任务可改期；循环任务仅可删除本条逾期，超过 16 条自动清理最早记录</span>
               </span>
               <span className="flex items-center gap-1 text-sm font-medium text-red-700">{showOverdue ? '收起' : '查看'}<ChevronRight className={`size-4 transition-transform ${showOverdue ? 'rotate-90' : ''}`} /></span>
             </button>
             {showOverdue ? (
               <div className="divide-y divide-red-100 border-t border-red-100">
-                {derived.overdue.map((occurrence) => <TaskRow key={occurrence.id} occurrence={occurrence} today={data.today} onStatusChange={onStatusChange} onClearOverdue={onClearOverdue} onEditTask={canManageDefinition(data, occurrence) ? onEditTask : undefined} onDeleteTask={canManageDefinition(data, occurrence) ? onDeleteTask : undefined} onCycleChange={canManageDefinition(data, occurrence) ? onCycleChange : undefined} compact />)}
+                {derived.overdue.map((occurrence) => <TaskRow key={occurrence.id} occurrence={occurrence} today={data.today} onStatusChange={onStatusChange} onClearOverdue={onClearOverdue} onRescheduleOverdue={onRescheduleOverdue} onEditTask={canManageDefinition(data, occurrence) ? onEditTask : undefined} onDeleteTask={canManageDefinition(data, occurrence) ? onDeleteTask : undefined} onCycleChange={canManageDefinition(data, occurrence) ? onCycleChange : undefined} compact />)}
               </div>
             ) : null}
           </div>

@@ -834,6 +834,15 @@ export async function updateTask(id: string, input: CreateTaskInput) {
     : provided ? Math.ceil(provided * (unit === 'WEEK' ? 7 : 1)) : 1;
   const now = new Date().toISOString();
   if (recurrence === 'NONE') {
+    if (dueDate !== existing.dueDate) {
+      const current = await db.prepare('SELECT status, due_date AS dueDate FROM task_occurrences WHERE task_id = ?')
+        .bind(id).first<{ status: TaskStatus; dueDate: string | null }>();
+      const preference = await db.prepare("SELECT timezone FROM user_preferences WHERE id = 'default'").first<{ timezone: string }>();
+      const today = todayInTimeZone(preference?.timezone ?? DEFAULT_TIMEZONE);
+      if (current?.status === 'PENDING' && current.dueDate && current.dueDate < today && (!dueDate || dueDate < today)) {
+        throw new Error('逾期任务的新截止日期必须为今天或以后，不能清空');
+      }
+    }
     await db.batch([
       db.prepare(`UPDATE task_definitions SET goal_id = ?, project_id = ?, title = ?, description = ?, start_date = ?, own_due_date = ?, duration_value = ?, duration_days = ?, display_unit = ?, updated_at = ? WHERE id = ?`)
         .bind(input.goalId, input.projectId ?? null, title, input.description?.trim() ?? '', input.startDate, dueDate, normalizedDurationValue(provided, days, unit), days, unit, now, id),
@@ -1154,6 +1163,48 @@ export async function updateOccurrenceStatus(id: string, status: TaskStatus) {
     now,
     id,
   ).run();
+}
+
+export async function rescheduleOverdueTask(id: string, dueDate: string) {
+  const db = getDb();
+  const preference = await db.prepare("SELECT timezone FROM user_preferences WHERE id = 'default'").first<{ timezone: string }>();
+  const today = todayInTimeZone(preference?.timezone ?? DEFAULT_TIMEZONE);
+  if (!isDate(dueDate) || dueDate < today) throw new Error('新截止日期不能早于今天');
+
+  const occurrence = await db.prepare(`
+    SELECT o.status, o.due_date AS dueDate, td.id AS taskId, td.type,
+      td.start_date AS startDate, td.goal_id AS goalId, td.project_id AS projectId,
+      td.display_unit AS displayUnit
+    FROM task_occurrences o JOIN task_definitions td ON td.id = o.task_id
+    WHERE o.id = ? AND td.deleted_at IS NULL
+  `).bind(id).first<{
+    status: TaskStatus;
+    dueDate: string | null;
+    taskId: string;
+    type: 'ONE_TIME' | 'RECURRING';
+    startDate: string;
+    goalId: string;
+    projectId: string | null;
+    displayUnit: 'DAY' | 'WEEK';
+  }>();
+  if (!occurrence || occurrence.type !== 'ONE_TIME' || occurrence.status !== 'PENDING'
+    || !occurrence.dueDate || occurrence.dueDate >= today) {
+    throw new Error('只有未处理的普通逾期任务可以重设截止日期');
+  }
+
+  const bounds = await getParentBounds(occurrence.goalId, occurrence.projectId);
+  const latestEnd = minDate(bounds.areaDueDate, bounds.goalDueDate, bounds.projectDueDate);
+  if (latestEnd && latestEnd < today) throw new Error('上层截止日期已过，请先调整上层事项');
+  if (latestEnd && dueDate > latestEnd) throw new Error(`新截止日期不能超过上层边界 ${latestEnd}`);
+  const durationDays = differenceInDays(dueDate, occurrence.startDate) + 1;
+  const now = new Date().toISOString();
+  await db.batch([
+    db.prepare(`UPDATE task_definitions SET own_due_date = ?, duration_days = ?, duration_value = ?, updated_at = ? WHERE id = ?`)
+      .bind(dueDate, durationDays, normalizedDurationValue(null, durationDays, occurrence.displayUnit), now, occurrence.taskId),
+    db.prepare('UPDATE task_occurrences SET due_date = ?, updated_at = ? WHERE id = ?')
+      .bind(dueDate, now, id),
+  ]);
+  return { id };
 }
 
 export async function clearOverdueOccurrence(id: string) {
